@@ -1,0 +1,7 @@
+{
+  "name": "DP Artifacts Ad Generator",
+  "description": "Upload a product image to generate stunning video advertisements using AI. Choose from dynamic animation styles and create high-quality ads in seconds.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
