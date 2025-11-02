@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 export const UploadIcon = ({ className }: { className?: string }) => (
@@ -12,6 +13,15 @@ export const CameraIcon = ({ className }: { className?: string }) => (
     <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
   </svg>
 );
+
+export const MagicWandIcon = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className || "w-6 h-6"}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.475 2.118A2.25 2.25 0 0 1 .75 18.75a2.25 2.25 0 0 1 2.25-2.25c1.152 0 2.163.621 2.743 1.572a3 3 0 0 0 5.78-1.128 2.25 2.25 0 0 1 2.475-2.118 2.25 2.25 0 0 1 2.25 2.25c0 1.282-1.217 2.333-2.743 2.118a3 3 0 0 0-5.78 1.128z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M21 12.75a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0zM12.75 5.25a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="m12.75 15-2.25-2.25m4.5-4.5-2.25-2.25" />
+  </svg>
+);
+
 
 export const DownloadIcon = ({ className }: { className?: string }) => (
     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className || "w-6 h-6"}>

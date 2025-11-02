@@ -1,5 +1,6 @@
 import React from 'react';
 import { LogoutIcon } from './icons';
+import { Logo } from './Logo';
 
 interface HeaderProps {
     isLoggedIn: boolean;
@@ -9,11 +10,8 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ isLoggedIn, onLogout }) => (
     <header className="py-4 px-8 w-full flex items-center justify-center relative">
         <div className="text-center">
-            <h1 className="text-3xl md:text-4xl font-bold tracking-tighter">
-                <span className="text-white">DP</span>
-                <span className="text-white font-thin italic">Artifacts</span>
-            </h1>
-            <p className="text-accent-blue text-sm">AI Ad Generator</p>
+            <Logo className="h-14 mx-auto" />
+            <p className="text-accent-blue text-sm mt-1">AI Ad Generator</p>
         </div>
         {isLoggedIn && (
             <button 

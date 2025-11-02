@@ -2,29 +2,30 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppState, AnimationOption, GeneratedVideo, AspectRatio, User } from './types';
 import { ANIMATION_OPTIONS, LOADING_MESSAGES } from './constants';
-import { generateVideoAd, fileToBase64, getMimeType } from './services/geminiService';
-import { loginUser, registerUser } from './services/apiService';
+import { loginUser, registerUser, getVideos, generateVideoAd, editImage, loginWithGoogle } from './services/apiService';
 import { Header } from './components/Header';
 import { ShinyButton } from './components/ShinyButton';
 import { Loader } from './components/Loader';
-import { UploadIcon, CameraIcon, DownloadIcon, FacebookIcon, TwitterIcon, InstagramIcon, CopyIcon, ShareIcon, GoogleIcon, AppleIcon } from './components/icons';
+import { UploadIcon, CameraIcon, DownloadIcon, FacebookIcon, TwitterIcon, InstagramIcon, CopyIcon, ShareIcon, GoogleIcon, AppleIcon, MagicWandIcon } from './components/icons';
+import { GoogleOAuthProvider, GoogleLogin, CredentialResponse } from '@react-oauth/google';
+import { Logo } from './components/Logo';
 
-const ApiKeyScreen: React.FC<{ onSelectKey: () => void }> = ({ onSelectKey }) => (
-    <div className="text-center p-8 bg-gray-800/50 rounded-2xl backdrop-blur-sm border border-dpa-purple/50 shadow-lg max-w-lg">
-        <h2 className="text-2xl font-bold mb-4">API Key Required</h2>
-        <p className="mb-4 text-gray-300">To generate videos with Veo, Google's most advanced video model, you need to select a project API key.</p>
-        <p className="text-sm text-gray-400 mb-6">This is a security measure and ensures that usage is correctly billed to your project.</p>
-        <p className="mb-6 text-sm text-gray-400">
-            For more information on billing, please visit the{' '}
-            <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-accent-blue hover:underline">
-                official documentation
-            </a>.
-        </p>
-        <ShinyButton onClick={onSelectKey} color="blue">
-            Select API Key
-        </ShinyButton>
-    </div>
-);
+
+// IMPORTANT: Replace with the Client ID you get from Google Cloud Console
+const GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com"; 
+
+const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onerror = error => reject(error);
+    });
+};
+
+const getMimeType = (file: File): string => {
+    return file.type;
+};
 
 const AuthScreen: React.FC<{ 
     isLogin: boolean, 
@@ -59,22 +60,47 @@ const AuthScreen: React.FC<{
             setIsLoading(false);
         }
     };
+    
+    const handleGoogleLoginSuccess = async (credentialResponse: CredentialResponse) => {
+        setIsLoading(true);
+        setError(null);
+        if (credentialResponse.credential) {
+            try {
+                const { token, user } = await loginWithGoogle(credentialResponse.credential);
+                onAuthSuccess(token, user);
+            } catch (err: any) {
+                 setError(err.message || 'An error occurred during Google login.');
+            } finally {
+                setIsLoading(false);
+            }
+        } else {
+            setError('Google login failed: No credential received.');
+            setIsLoading(false);
+        }
+    };
+    
+    const handleGoogleLoginError = () => {
+         setError('Google login failed. Please try again.');
+    };
 
-    const handleSocialLogin = () => {
-        showNotification("Social login coming soon!");
-    }
 
     return (
         <div className="w-full max-w-md text-center p-8 bg-gray-800/50 rounded-2xl backdrop-blur-sm border border-dpa-purple/50 shadow-lg">
+            <Logo className="h-20 mx-auto mb-4" />
             <h2 className="text-2xl font-bold mb-2">{title}</h2>
             <p className="mb-6 text-gray-300">{subtitle}</p>
 
             <div className="space-y-3">
-                <button onClick={handleSocialLogin} className="w-full flex items-center justify-center gap-3 bg-white text-gray-800 font-semibold py-2.5 px-4 rounded-lg hover:bg-gray-200 transition-colors">
-                    <GoogleIcon className="w-5 h-5" />
-                    Continue with Google
-                </button>
-                 <button onClick={handleSocialLogin} className="w-full flex items-center justify-center gap-3 bg-black text-white font-semibold py-2.5 px-4 rounded-lg hover:bg-gray-800 transition-colors border border-gray-600">
+                 <div className="flex justify-center">
+                    <GoogleLogin
+                        onSuccess={handleGoogleLoginSuccess}
+                        onError={handleGoogleLoginError}
+                        theme="filled_black"
+                        text={isLogin ? "signin_with" : "signup_with"}
+                        shape="rectangular"
+                    />
+                 </div>
+                 <button onClick={() => showNotification("Apple login coming soon!")} className="w-full flex items-center justify-center gap-3 bg-black text-white font-semibold py-2.5 px-4 rounded-lg hover:bg-gray-800 transition-colors border border-gray-600">
                     <AppleIcon className="w-5 h-5" />
                     Continue with Apple
                 </button>
@@ -113,6 +139,9 @@ const App: React.FC = () => {
     const [appState, setAppState] = useState<AppState>(AppState.LOGIN);
     const [uploadedImageFile, setUploadedImageFile] = useState<File | null>(null);
     const [uploadedImageB64, setUploadedImageB64] = useState<string | null>(null);
+    const [originalImageB64, setOriginalImageB64] = useState<string | null>(null);
+    const [editPrompt, setEditPrompt] = useState<string>('');
+    const [isEditing, setIsEditing] = useState<boolean>(false);
     const [selectedAnimation, setSelectedAnimation] = useState<AnimationOption | null>(null);
     const [selectedAddOn, setSelectedAddOn] = useState<AnimationOption | null>(null);
     const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9');
@@ -124,39 +153,37 @@ const App: React.FC = () => {
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     
-    // Check for stored token on initial load
+    const fetchUserLibrary = useCallback(async (authToken: string) => {
+        try {
+            const videos = await getVideos(authToken);
+            setGeneratedVideos(videos);
+        } catch (err: any) {
+            setError("Could not load your video library. Please try logging in again.");
+            handleLogout();
+        }
+    }, []);
+    
     useEffect(() => {
         const storedToken = localStorage.getItem('authToken');
         if (storedToken) {
             setToken(storedToken);
             const storedUser = localStorage.getItem('user');
             if(storedUser) setUser(JSON.parse(storedUser));
-            setAppState(AppState.API_KEY_CHECK);
+            fetchUserLibrary(storedToken);
+            setAppState(AppState.UPLOAD); // Go directly to upload screen
         }
-    }, []);
+    }, [fetchUserLibrary]);
 
     const isLoggedIn = !!token;
-
-    const checkApiKey = useCallback(async () => {
-        if (window.aistudio && await window.aistudio.hasSelectedApiKey()) {
-            setAppState(AppState.UPLOAD);
-        } else {
-            setAppState(AppState.API_KEY_CHECK);
-        }
-    }, []);
-    
-    useEffect(() => {
-        if (isLoggedIn && appState === AppState.API_KEY_CHECK) {
-            checkApiKey();
-        }
-    }, [isLoggedIn, appState, checkApiKey]);
     
     const handleAuthSuccess = (newToken: string, newUser: User) => {
         localStorage.setItem('authToken', newToken);
         localStorage.setItem('user', JSON.stringify(newUser));
         setToken(newToken);
         setUser(newUser);
-        setAppState(AppState.API_KEY_CHECK);
+        setGeneratedVideos([]); // Clear previous user's videos
+        fetchUserLibrary(newToken);
+        setAppState(AppState.UPLOAD); // Go directly to upload screen
     };
 
     const handleLogout = () => {
@@ -166,16 +193,6 @@ const App: React.FC = () => {
         setUser(null);
         setGeneratedVideos([]); // Clear videos on logout
         setAppState(AppState.LOGIN);
-    };
-
-    const handleSelectApiKey = async () => {
-        try {
-            await window.aistudio.openSelectKey();
-            setAppState(AppState.UPLOAD);
-        } catch (e) {
-            console.error("Error opening API key selection:", e);
-            setError("Could not open API key selection dialog.");
-        }
     };
     
     useEffect(() => {
@@ -195,7 +212,8 @@ const App: React.FC = () => {
                 const b64 = await fileToBase64(file);
                 setUploadedImageFile(file);
                 setUploadedImageB64(b64);
-                setAppState(AppState.SELECT_ANIMATION);
+                setOriginalImageB64(b64);
+                setAppState(AppState.CHOOSE_ACTION);
                 setError(null);
             } catch (err) {
                 setError("Could not process the image file.");
@@ -203,8 +221,31 @@ const App: React.FC = () => {
         }
     };
 
+    const handleImageEdit = async () => {
+        if (!uploadedImageFile || !uploadedImageB64 || !editPrompt || !token) return;
+
+        setIsEditing(true);
+        setError(null);
+
+        try {
+            const mimeType = getMimeType(uploadedImageFile);
+            const { imageB64: newImageB64 } = await editImage({
+                imageB64: uploadedImageB64,
+                imageMimeType: mimeType,
+                prompt: editPrompt
+            }, token);
+
+            setUploadedImageB64(newImageB64);
+            setEditPrompt('');
+        } catch (err: any) {
+             setError(err.message || 'An error occurred during image editing.');
+        } finally {
+            setIsEditing(false);
+        }
+    };
+
     const handleCreateAd = async () => {
-        if (!uploadedImageFile || !uploadedImageB64 || !selectedAnimation) return;
+        if (!uploadedImageFile || !uploadedImageB64 || !selectedAnimation || !token) return;
         setAppState(AppState.GENERATING);
         setError(null);
         setLoadingMessage(LOADING_MESSAGES[0]);
@@ -216,19 +257,25 @@ const App: React.FC = () => {
 
         try {
             const mimeType = getMimeType(uploadedImageFile);
-            const videoUrl = await generateVideoAd(uploadedImageB64, mimeType, finalPrompt, aspectRatio);
-            const newVideo: GeneratedVideo = { id: new Date().toISOString(), src: videoUrl, prompt: finalPrompt };
+            
+            const newVideo = await generateVideoAd({
+                imageB64: uploadedImageB64,
+                imageMimeType: mimeType,
+                prompt: finalPrompt,
+                aspectRatio: aspectRatio,
+            }, token);
+
             setGeneratedVideos(prev => [newVideo, ...prev]);
-            // In a real app, you would also send this video to your backend to associate it with the logged-in user
-            setCurrentVideoUrl(videoUrl);
+            setCurrentVideoUrl(newVideo.src);
             setAppState(AppState.VIEW_VIDEO);
+
         } catch (err: any) {
             let errorMessage = err.message || "An unknown error occurred during video generation.";
-            if (errorMessage.includes("Requested entity was not found")) {
-                errorMessage = "API Key not found or invalid. Please select your key again.";
-                setAppState(AppState.API_KEY_CHECK);
+            if (errorMessage.includes("401") || errorMessage.includes("denied")) {
+                errorMessage = "Your session has expired. Please log in again.";
+                handleLogout();
             } else {
-                 setAppState(AppState.SELECT_ANIMATION);
+                setAppState(AppState.SELECT_ANIMATION);
             }
             setError(errorMessage);
         }
@@ -269,17 +316,24 @@ const App: React.FC = () => {
     
     const handleCopyLink = () => {
         if (currentVideoUrl) {
-           showNotification("Please download the video to share the file.");
+            if (currentVideoUrl.startsWith('data:')) {
+                showNotification("Please download the video to share the file.");
+            } else {
+                navigator.clipboard.writeText(currentVideoUrl);
+                showNotification("Link copied to clipboard!");
+            }
         }
     };
 
     const resetToUpload = () => {
         setUploadedImageFile(null);
         setUploadedImageB64(null);
+        setOriginalImageB64(null);
         setSelectedAnimation(null);
         setSelectedAddOn(null);
         setCurrentVideoUrl(null);
         setError(null);
+        setEditPrompt('');
         setAppState(AppState.UPLOAD);
     };
 
@@ -296,9 +350,6 @@ const App: React.FC = () => {
         }
 
         switch (appState) {
-            case AppState.API_KEY_CHECK:
-                return <ApiKeyScreen onSelectKey={handleSelectApiKey} />;
-
             case AppState.UPLOAD:
                 return (
                     <div className="w-full max-w-2xl text-center p-8 bg-gray-800/50 rounded-2xl backdrop-blur-sm border border-dpa-purple/50 shadow-lg">
@@ -328,6 +379,73 @@ const App: React.FC = () => {
                                 </div>
                             </div>
                         )}
+                    </div>
+                );
+            
+            case AppState.CHOOSE_ACTION:
+                return (
+                    <div className="w-full max-w-2xl text-center p-8 bg-gray-800/50 rounded-2xl backdrop-blur-sm border border-dpa-purple/50 shadow-lg">
+                        <h2 className="text-2xl font-bold mb-4">Image Uploaded!</h2>
+                        <img src={`data:image/png;base64,${uploadedImageB64}`} alt="Uploaded product" className="rounded-2xl max-h-72 mx-auto mb-8 shadow-lg border-2 border-dpa-purple" />
+                        <p className="mb-8 text-gray-300">What would you like to do next?</p>
+                        <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                            <ShinyButton color="orange" onClick={() => setAppState(AppState.EDIT_IMAGE)}>
+                                <MagicWandIcon className="w-5 h-5 mr-2" /> Edit Image
+                            </ShinyButton>
+                            <ShinyButton color="blue" onClick={() => setAppState(AppState.SELECT_ANIMATION)}>
+                                Create Video Ad
+                            </ShinyButton>
+                        </div>
+                        <button onClick={resetToUpload} className="mt-6 text-gray-400 hover:text-white transition-colors">
+                            Or upload a different image
+                        </button>
+                    </div>
+                );
+
+            case AppState.EDIT_IMAGE:
+                return (
+                    <div className="w-full max-w-5xl p-8">
+                        <div className="grid md:grid-cols-2 gap-8 items-start">
+                            <div className="flex flex-col items-center">
+                                <h2 className="text-xl font-semibold mb-4">Image Preview</h2>
+                                <div className="relative">
+                                    {isEditing && (
+                                        <div className="absolute inset-0 bg-gray-900/80 flex items-center justify-center rounded-2xl z-10">
+                                            <Loader message="Editing..." />
+                                        </div>
+                                    )}
+                                    <img src={`data:image/png;base64,${uploadedImageB64}`} alt="Product to be edited" className="rounded-2xl max-h-96 shadow-lg border-2 border-dpa-purple" />
+                                </div>
+                                {uploadedImageB64 !== originalImageB64 && (
+                                    <button onClick={() => setUploadedImageB64(originalImageB64)} className="mt-4 text-accent-orange hover:underline">
+                                        Revert to Original
+                                    </button>
+                                )}
+                            </div>
+                            <div>
+                                <h2 className="text-xl font-semibold mb-4">Edit with a Prompt</h2>
+                                <p className="text-gray-400 mb-4">Describe the changes you want to make. For example: "Add a retro filter", "Change the background to a beach", "Make the product look like it's made of wood".</p>
+                                <textarea
+                                    value={editPrompt}
+                                    onChange={e => setEditPrompt(e.target.value)}
+                                    placeholder="e.g., Add a soft, glowing light around the product..."
+                                    className="w-full h-28 bg-gray-900/50 border border-gray-600 rounded-lg px-4 py-2 mb-4 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-accent-blue resize-none"
+                                    disabled={isEditing}
+                                />
+                                <ShinyButton onClick={handleImageEdit} disabled={!editPrompt || isEditing} color="orange" className="w-full mb-6">
+                                    {isEditing ? 'Applying Edit...' : 'Generate Edit'}
+                                </ShinyButton>
+
+                                <div className="border-t border-dpa-purple/50 pt-6 flex flex-col sm:flex-row gap-4">
+                                    <ShinyButton onClick={() => setAppState(AppState.CHOOSE_ACTION)} className="bg-gray-700 hover:bg-gray-600 w-full sm:w-auto">
+                                        Back
+                                    </ShinyButton>
+                                    <ShinyButton onClick={() => setAppState(AppState.SELECT_ANIMATION)} color="blue" className="w-full sm:w-auto">
+                                        Use This Image & Create Ad
+                                    </ShinyButton>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 );
 
@@ -428,23 +546,25 @@ const App: React.FC = () => {
     };
 
     return (
-        <div className="min-h-screen w-full bg-gradient-to-br from-gray-900 via-purple-900/50 to-gray-900 flex flex-col items-center justify-center p-4">
-            <Header isLoggedIn={isLoggedIn} onLogout={handleLogout} />
-            <main className="flex-grow flex items-center justify-center w-full">
-                {error && (
-                    <div className="fixed top-24 bg-red-600/90 text-white p-4 rounded-lg shadow-lg z-50 animate-pulse" role="alert">
-                        <strong>Error:</strong> {error}
-                        <button onClick={() => setError(null)} className="ml-4 font-bold text-lg">&times;</button>
-                    </div>
-                )}
-                {notification && (
-                     <div className="fixed top-24 bg-blue-600/90 text-white p-4 rounded-lg shadow-lg z-50" role="status">
-                        {notification}
-                    </div>
-                )}
-                {renderContent()}
-            </main>
-        </div>
+        <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+            <div className="min-h-screen w-full bg-dpa-dark-gradient flex flex-col items-center justify-center p-4">
+                <Header isLoggedIn={isLoggedIn} onLogout={handleLogout} />
+                <main className="flex-grow flex items-center justify-center w-full">
+                    {error && (
+                        <div className="fixed top-24 bg-red-600/90 text-white p-4 rounded-lg shadow-lg z-50 animate-pulse" role="alert">
+                            <strong>Error:</strong> {error}
+                            <button onClick={() => setError(null)} className="ml-4 font-bold text-lg">&times;</button>
+                        </div>
+                    )}
+                    {notification && (
+                         <div className="fixed top-24 bg-blue-600/90 text-white p-4 rounded-lg shadow-lg z-50" role="status">
+                            {notification}
+                        </div>
+                    )}
+                    {renderContent()}
+                </main>
+            </div>
+        </GoogleOAuthProvider>
     );
 };
 
